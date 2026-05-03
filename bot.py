@@ -24,8 +24,8 @@ class AntiNuke(commands.Bot):
         intents = discord.Intents.all()
         super().__init__(command_prefix='!', intents=intents)
         self.deleted_channels = defaultdict(list)
-        self.window_time = 10        # уменьшил окно
-        self.threshold = 4
+        self.window_time = 4    # уменьшил окно
+        self.threshold = 3
         self.whitelist = {123456789}  # Твой ID
         self.recovering = False      # флаг, чтобы не ловить свои же восстановления
         self.nuke_detected = set()   # сервера, где уже был нюк
