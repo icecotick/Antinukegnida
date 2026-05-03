@@ -23,14 +23,31 @@ class AntiNuke(commands.Bot):
     def __init__(self):
         intents = discord.Intents.all()
         super().__init__(command_prefix='!', intents=intents)
-        self.deleted_channels = defaultdict(list)
-        self.window_time = 5
-        self.threshold = 3
+        self.channel_snapshot = {}
+        self.deleted_timestamps = defaultdict(list)
+        self.detection_window = 3
+        self.threshold = 2
         self.whitelist = {123456789}
         self.recovering = False
 
     async def setup_hook(self):
         print(f'Анти-нюк активен | {self.user}')
+        for guild in self.guilds:
+            self.save_snapshot(guild)
+
+    def save_snapshot(self, guild):
+        if guild.id in self.channel_snapshot:
+            return  # Не обновляем если уже есть
+        self.channel_snapshot[guild.id] = []
+        for channel in guild.channels:
+            self.channel_snapshot[guild.id].append({
+                'name': channel.name,
+                'position': channel.position,
+                'category': channel.category,
+                'overwrites': channel.overwrites,
+                'type': str(channel.type)
+            })
+        print(f'Слепок сохранён: {guild.name} ({len(self.channel_snapshot[guild.id])} каналов)')
 
     async def on_guild_channel_delete(self, channel):
         if not channel.guild or self.recovering:
@@ -39,52 +56,52 @@ class AntiNuke(commands.Bot):
         guild = channel.guild
         now = asyncio.get_running_loop().time()
 
-        channel_info = {
-            'name': channel.name,
-            'position': channel.position,
-            'category': channel.category,
-            'overwrites': channel.overwrites
-        }
-
-        self.deleted_channels[guild.id].append({
-            'time': now,
-            'info': channel_info
-        })
-
-        self.deleted_channels[guild.id] = [
-            c for c in self.deleted_channels[guild.id]
-            if now - c['time'] <= self.window_time
+        self.deleted_timestamps[guild.id] = [
+            t for t in self.deleted_timestamps[guild.id]
+            if now - t <= self.detection_window
         ]
+        self.deleted_timestamps[guild.id].append(now)
 
-        if len(self.deleted_channels[guild.id]) >= self.threshold:
+        if len(self.deleted_timestamps[guild.id]) >= self.threshold:
             self.recovering = True
+            self.deleted_timestamps[guild.id].clear()
 
             try:
+                # БАН
                 async for entry in guild.audit_logs(action=discord.AuditLogAction.channel_delete, limit=1):
                     if entry.user.id not in self.whitelist:
                         try:
                             await guild.ban(entry.user, reason='Анти-нюк: удаление каналов')
-                        except Exception:
-                            pass
+                            print(f'Забанен {entry.user}')
+                        except Exception as e:
+                            print(f'Ошибка бана: {e}')
 
-                for deleted in self.deleted_channels[guild.id]:
-                    info = deleted['info']
-                    try:
-                        await guild.create_text_channel(
-                            name=info['name'],
-                            category=info['category'],
-                            overwrites=info['overwrites'],
-                            position=info['position']
-                        )
-                        await asyncio.sleep(0.5)
-                    except Exception:
-                        pass
+                # ВОССТАНОВЛЕНИЕ по изначальному слепку
+                if guild.id in self.channel_snapshot:
+                    current_names = {ch.name for ch in guild.channels}
+                    restored = 0
+                    for saved in self.channel_snapshot[guild.id]:
+                        if saved['name'] not in current_names:
+                            try:
+                                await guild.create_text_channel(
+                                    name=saved['name'],
+                                    category=saved['category'],
+                                    overwrites=saved['overwrites'],
+                                    position=saved['position']
+                                )
+                                restored += 1
+                                await asyncio.sleep(0.3)
+                            except Exception:
+                                pass
+                    print(f'Восстановлено: {restored}')
 
-                self.deleted_channels[guild.id].clear()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f'Ошибка: {e}')
             finally:
                 self.recovering = False
+
+    async def on_guild_join(self, guild):
+        self.save_snapshot(guild)
 
     async def on_guild_role_delete(self, role):
         guild = role.guild
