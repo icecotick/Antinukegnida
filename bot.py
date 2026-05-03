@@ -24,7 +24,7 @@ class AntiNuke(commands.Bot):
         intents = discord.Intents.all()
         super().__init__(command_prefix='!', intents=intents)
         self.deleted_channels = defaultdict(list)
-        self.window_time = 3
+        self.window_time = 5
         self.threshold = 3
         self.whitelist = {123456789}
         self.recovering = False
