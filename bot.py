@@ -6,7 +6,6 @@ from collections import defaultdict
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
-# HTTP-сервер для Health Check на Render
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -20,14 +19,13 @@ def run_health_server():
 
 threading.Thread(target=run_health_server, daemon=True).start()
 
-# Основной код бота
 class AntiNuke(commands.Bot):
     def __init__(self):
         intents = discord.Intents.all()
         super().__init__(command_prefix='!', intents=intents)
         self.deleted_channels = defaultdict(list)
         self.window_time = 25
-        self.threshold = 4
+        self.threshold = 3
         self.whitelist = {123456789}  # Твой ID
 
     async def setup_hook(self):
@@ -39,10 +37,24 @@ class AntiNuke(commands.Bot):
         guild = channel.guild
         now = asyncio.get_running_loop().time()
         
-        self.deleted_channels[guild.id].append(now)
+        # Сохраняем инфу о канале ДО его удаления
+        channel_info = {
+            'name': channel.name,
+            'position': channel.position,
+            'category': channel.category,
+            'overwrites': channel.overwrites,
+            'type': channel.type
+        }
+        
+        self.deleted_channels[guild.id].append({
+            'time': now,
+            'info': channel_info
+        })
+        
+        # Чистим старые записи за пределами окна
         self.deleted_channels[guild.id] = [
-            t for t in self.deleted_channels[guild.id] 
-            if now - t <= self.window_time
+            c for c in self.deleted_channels[guild.id] 
+            if now - c['time'] <= self.window_time
         ]
         
         if len(self.deleted_channels[guild.id]) >= self.threshold:
@@ -53,10 +65,27 @@ class AntiNuke(commands.Bot):
                             await guild.ban(entry.user, reason='Анти-нюк: массовое удаление каналов')
                         except Exception:
                             pass
-                        try:
-                            await channel.clone()
-                        except Exception:
-                            pass
+                        
+                        # Восстанавливаем ВСЕ удалённые каналы
+                        for deleted in self.deleted_channels[guild.id]:
+                            info = deleted['info']
+                            try:
+                                if info['category']:
+                                    await guild.create_text_channel(
+                                        name=info['name'],
+                                        position=info['position'],
+                                        category=info['category'],
+                                        overwrites=info['overwrites']
+                                    )
+                                else:
+                                    await guild.create_text_channel(
+                                        name=info['name'],
+                                        position=info['position'],
+                                        overwrites=info['overwrites']
+                                    )
+                            except Exception:
+                                pass
+                        
                         self.deleted_channels[guild.id].clear()
             except Exception:
                 pass
