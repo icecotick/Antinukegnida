@@ -3,6 +3,7 @@ from discord.ext import commands
 import datetime
 import os
 from dotenv import load_dotenv
+import asyncio
 
 # Загружаем переменные окружения
 load_dotenv()
@@ -71,4 +72,12 @@ if __name__ == "__main__":
     if not token:
         print("Ошибка: Токен не найден в переменных окружения!")
         exit(1)
-    bot.run(token)
+    
+    # Запускаем бота с обработкой ошибок
+    async def main():
+        try:
+            await bot.start(token)
+        except Exception as e:
+            print(f"Ошибка при запуске бота: {e}")
+    
+    asyncio.run(main())
