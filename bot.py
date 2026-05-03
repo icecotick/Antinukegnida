@@ -119,7 +119,7 @@ class AntiNuke(commands.Bot):
             pass
 
 bot = AntiNuke()
-bot.run(os.environ['DISCORD_TOKEN'])                                    )
+bot.run(os.environ['DISCORD_TOKEN'])
                                 else:
                                     await guild.create_text_channel(
                                         name=info['name'],
