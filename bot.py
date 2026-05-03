@@ -24,26 +24,28 @@ class AntiNuke(commands.Bot):
         intents = discord.Intents.all()
         super().__init__(command_prefix='!', intents=intents)
         self.deleted_channels = defaultdict(list)
-        self.window_time = 25
-        self.threshold = 3
+        self.window_time = 10        # уменьшил окно
+        self.threshold = 4
         self.whitelist = {123456789}  # Твой ID
+        self.recovering = False      # флаг, чтобы не ловить свои же восстановления
+        self.nuke_detected = set()   # сервера, где уже был нюк
 
     async def setup_hook(self):
         print(f'Анти-нюк активен | {self.user}')
 
     async def on_guild_channel_delete(self, channel):
-        if not channel.guild:
+        if not channel.guild or self.recovering:
             return
+        
         guild = channel.guild
         now = asyncio.get_running_loop().time()
         
-        # Сохраняем инфу о канале ДО его удаления
         channel_info = {
             'name': channel.name,
             'position': channel.position,
             'category': channel.category,
             'overwrites': channel.overwrites,
-            'type': channel.type
+            'type': str(channel.type)
         }
         
         self.deleted_channels[guild.id].append({
@@ -51,13 +53,14 @@ class AntiNuke(commands.Bot):
             'info': channel_info
         })
         
-        # Чистим старые записи за пределами окна
         self.deleted_channels[guild.id] = [
             c for c in self.deleted_channels[guild.id] 
             if now - c['time'] <= self.window_time
         ]
         
-        if len(self.deleted_channels[guild.id]) >= self.threshold:
+        if len(self.deleted_channels[guild.id]) >= self.threshold and guild.id not in self.nuke_detected:
+            self.nuke_detected.add(guild.id)
+            
             try:
                 async for entry in guild.audit_logs(action=discord.AuditLogAction.channel_delete, limit=1):
                     if entry.user.id not in self.whitelist:
@@ -66,17 +69,57 @@ class AntiNuke(commands.Bot):
                         except Exception:
                             pass
                         
-                        # Восстанавливаем ВСЕ удалённые каналы
+                        self.recovering = True
+                        restored = 0
                         for deleted in self.deleted_channels[guild.id]:
+                            if restored >= len(self.deleted_channels[guild.id]):
+                                break
                             info = deleted['info']
                             try:
-                                if info['category']:
-                                    await guild.create_text_channel(
-                                        name=info['name'],
-                                        position=info['position'],
-                                        category=info['category'],
-                                        overwrites=info['overwrites']
-                                    )
+                                cat = info['category']
+                                await guild.create_text_channel(
+                                    name=info['name'],
+                                    category=cat,
+                                    overwrites=info['overwrites'],
+                                    position=info['position']
+                                )
+                                restored += 1
+                                await asyncio.sleep(0.5)
+                            except Exception:
+                                pass
+                        self.recovering = False
+                        self.deleted_channels[guild.id].clear()
+                        self.nuke_detected.discard(guild.id)
+            except Exception:
+                self.recovering = False
+                self.nuke_detected.discard(guild.id)
+
+    async def on_guild_role_delete(self, role):
+        guild = role.guild
+        try:
+            async for entry in guild.audit_logs(action=discord.AuditLogAction.role_delete, limit=1):
+                if entry.user.id not in self.whitelist:
+                    try:
+                        await guild.ban(entry.user, reason='Анти-нюк: удаление ролей')
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    async def on_member_ban(self, guild, user):
+        try:
+            async for entry in guild.audit_logs(action=discord.AuditLogAction.ban, limit=1):
+                if entry.user.id not in self.whitelist:
+                    try:
+                        await guild.ban(entry.user, reason='Анти-нюк: бан участников')
+                        await guild.unban(user)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+bot = AntiNuke()
+bot.run(os.environ['DISCORD_TOKEN'])                                    )
                                 else:
                                     await guild.create_text_channel(
                                         name=info['name'],
