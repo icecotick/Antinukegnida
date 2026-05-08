@@ -12,15 +12,36 @@ intents.guilds = True
 intents.members = True
 intents.moderation = True
 
-bot = commands.Bot(command_prefix='!', intents=intents)
+class AntiNukeBot(commands.Bot):
+    def __init__(self):
+        super().__init__(command_prefix='!', intents=intents)
+        self.channel_deletions = defaultdict(list)
+        
+    async def setup_hook(self):
+        """Запускается перед подключением к Discord"""
+        self.loop.create_task(self.cleanup_old_entries())
+        print("🔄 Фоновые задачи запущены")
+    
+    async def cleanup_old_entries(self):
+        """Очистка старых записей"""
+        await self.wait_until_ready()
+        while not self.is_closed():
+            current_time = time.time()
+            for user_id in list(self.channel_deletions.keys()):
+                self.channel_deletions[user_id] = [
+                    t for t in self.channel_deletions[user_id] 
+                    if current_time - t <= TIME_WINDOW
+                ]
+                if not self.channel_deletions[user_id]:
+                    del self.channel_deletions[user_id]
+            await asyncio.sleep(300)  # 5 минут
 
-# Отслеживание удалений
-channel_deletions = defaultdict(list)
+# Константы
 NUKE_THRESHOLD = 2  # Количество каналов
 TIME_WINDOW = 2  # В секундах
-
-# ID владельца сервера (опционально, для уведомлений)
 OWNER_ID = 123456789  # Замени на свой Discord ID
+
+bot = AntiNukeBot()
 
 @bot.event
 async def on_ready():
@@ -47,16 +68,16 @@ async def on_guild_channel_delete(channel):
                 current_time = time.time()
                 
                 # Добавляем запись об удалении
-                channel_deletions[deleter.id].append(current_time)
+                bot.channel_deletions[deleter.id].append(current_time)
                 
                 # Удаляем старые записи
-                channel_deletions[deleter.id] = [
-                    t for t in channel_deletions[deleter.id] 
+                bot.channel_deletions[deleter.id] = [
+                    t for t in bot.channel_deletions[deleter.id] 
                     if current_time - t <= TIME_WINDOW
                 ]
                 
                 # Проверяем количество удалений
-                if len(channel_deletions[deleter.id]) >= NUKE_THRESHOLD:
+                if len(bot.channel_deletions[deleter.id]) >= NUKE_THRESHOLD:
                     await handle_nuke(guild, deleter)
                 
                 break
@@ -108,6 +129,34 @@ async def handle_nuke(guild, user):
                 pass
     
     except discord.Forbidden:
+        print(f"❌ Нет прав на бан в {guild.name}")
+        try:
+            await guild.kick(user, reason="Анти-нюк: попытка нюка")
+        except:
+            pass
+    except Exception as e:
+        print(f"❌ Ошибка при бане: {e}")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def status(ctx):
+    """Проверка статуса анти-нюк системы"""
+    embed = discord.Embed(
+        title="🛡️ Анти-Нюк Статус",
+        color=discord.Color.green()
+    )
+    embed.add_field(name="Порог срабатывания", value=f"{NUKE_THRESHOLD} каналов")
+    embed.add_field(name="Временное окно", value=f"{TIME_WINDOW} сек")
+    embed.add_field(name="Отслеживаемых пользователей", value=len(bot.channel_deletions))
+    await ctx.send(embed=embed)
+
+if __name__ == "__main__":
+    TOKEN = os.getenv('DISCORD_TOKEN')
+    
+    if not TOKEN:
+        print("❌ Токен не найден! Установи переменную DISCORD_TOKEN в Render")
+    else:
+        bot.run(TOKEN)    except discord.Forbidden:
         print(f"❌ Нет прав на бан в {guild.name}")
         try:
             await guild.kick(user, reason="Анти-нюк: попытка нюка")
