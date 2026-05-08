@@ -34,11 +34,9 @@ async def on_ready():
 async def on_guild_channel_delete(channel):
     """Отслеживает удаление каналов и банит нарушителей"""
     try:
-        # Получаем аудит лога
         guild = channel.guild
         
         async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
-            # Проверяем, совпадает ли канал и время
             if entry.target.id == channel.id:
                 deleter = entry.user
                 
@@ -51,13 +49,13 @@ async def on_guild_channel_delete(channel):
                 # Добавляем запись об удалении
                 channel_deletions[deleter.id].append(current_time)
                 
-                # Удаляем старые записи (старше временного окна)
+                # Удаляем старые записи
                 channel_deletions[deleter.id] = [
                     t for t in channel_deletions[deleter.id] 
                     if current_time - t <= TIME_WINDOW
                 ]
                 
-                # Проверяем количество удалений в окне
+                # Проверяем количество удалений
                 if len(channel_deletions[deleter.id]) >= NUKE_THRESHOLD:
                     await handle_nuke(guild, deleter)
                 
@@ -71,7 +69,6 @@ async def on_guild_channel_delete(channel):
 async def handle_nuke(guild, user):
     """Обрабатывает обнаруженный нюк"""
     try:
-        # Баним нарушителя
         await guild.ban(
             user,
             reason="Анти-нюк: удаление нескольких каналов за 2 секунды",
@@ -80,7 +77,7 @@ async def handle_nuke(guild, user):
         
         print(f"🚨 Забанен {user} ({user.id}) на сервере {guild.name}")
         
-        # Отправляем уведомление в первый доступный текстовый канал
+        # Уведомление в первый доступный канал
         for channel in guild.text_channels:
             try:
                 embed = discord.Embed(
@@ -97,8 +94,8 @@ async def handle_nuke(guild, user):
             except:
                 continue
         
-        # Уведомление владельцу в ЛС (опционально)
-        if OWNER_ID != 123456789:  # Если ID изменен
+        # Уведомление владельцу
+        if OWNER_ID != 123456789:
             try:
                 owner = await bot.fetch_user(OWNER_ID)
                 if owner:
@@ -112,7 +109,6 @@ async def handle_nuke(guild, user):
     
     except discord.Forbidden:
         print(f"❌ Нет прав на бан в {guild.name}")
-        # Пытаемся кикнуть если нельзя забанить
         try:
             await guild.kick(user, reason="Анти-нюк: попытка нюка")
         except:
@@ -120,8 +116,8 @@ async def handle_nuke(guild, user):
     except Exception as e:
         print(f"❌ Ошибка при бане: {e}")
 
-# Очистка старых записей каждые 5 минут
 async def cleanup_old_entries():
+    """Очистка старых записей"""
     await bot.wait_until_ready()
     while not bot.is_closed():
         current_time = time.time()
@@ -147,15 +143,19 @@ async def status(ctx):
     embed.add_field(name="Отслеживаемых пользователей", value=len(channel_deletions))
     await ctx.send(embed=embed)
 
-# Запуск бота
-if __name__ == "__main__":
+async def main():
+    """Главная асинхронная функция"""
     # Запускаем очистку в фоне
     bot.loop.create_task(cleanup_old_entries())
     
-    # Получаем токен из переменных окружения Render
+    # Получаем токен
     TOKEN = os.getenv('DISCORD_TOKEN')
     
     if not TOKEN:
         print("❌ Токен не найден! Установи переменную DISCORD_TOKEN в Render")
-    else:
-        bot.run(TOKEN)
+        return
+    
+    await bot.start(TOKEN)
+
+if __name__ == "__main__":
+    asyncio.run(main())
