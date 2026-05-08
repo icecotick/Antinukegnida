@@ -1,161 +1,161 @@
 import discord
 from discord.ext import commands
-import asyncio
 import os
 from collections import defaultdict
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import threading
+import time
+import asyncio
 
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b'OK')
+# Настройка интентов
+intents = discord.Intents.default()
+intents.message_content = True
+intents.guilds = True
+intents.members = True
+intents.moderation = True
 
-def run_health_server():
-    port = int(os.environ.get('PORT', 10000))
-    server = HTTPServer(('0.0.0.0', port), HealthHandler)
-    server.serve_forever()
+bot = commands.Bot(command_prefix='!', intents=intents)
 
-threading.Thread(target=run_health_server, daemon=True).start()
+# Отслеживание удалений
+channel_deletions = defaultdict(list)
+NUKE_THRESHOLD = 2  # Количество каналов
+TIME_WINDOW = 2  # В секундах
 
-class AntiNuke(commands.Bot):
-    def __init__(self):
-        intents = discord.Intents.all()
-        super().__init__(command_prefix='!', intents=intents)
-        self.channel_snapshot = {}
-        self.deleted_timestamps = defaultdict(list)
-        self.detection_window = 5
-        self.threshold = 3
-        self.whitelist = {123456789}
-        self.recovering = False
+# ID владельца сервера (опционально, для уведомлений)
+OWNER_ID = 123456789  # Замени на свой Discord ID
 
-    async def setup_hook(self):
-        print(f'Анти-нюк активен | {self.user}')
-        await self.wait_until_ready()
-        for guild in self.guilds:
-            await self.save_snapshot(guild)
+@bot.event
+async def on_ready():
+    print(f'✅ {bot.user} запущен на Render!')
+    await bot.change_presence(activity=discord.Activity(
+        type=discord.ActivityType.watching, 
+        name="за нюкерами 👀"
+    ))
 
-    async def save_snapshot(self, guild):
-        if guild.id in self.channel_snapshot:
-            return
-        channels = []
-        for channel in guild.channels:
-            try:
-                overwrites = {}
-                for target, overwrite in channel.overwrites.items():
-                    overwrites[str(target.id)] = {
-                        'allow': overwrite.pair()[0].value,
-                        'deny': overwrite.pair()[1].value
-                    }
-                channels.append({
-                    'name': channel.name,
-                    'position': channel.position,
-                    'category_id': channel.category_id,
-                    'type': str(channel.type)
-                })
-                print(f'  Сохранён: {channel.name}')
-            except Exception as e:
-                print(f'  Ошибка сохранения {channel.name}: {e}')
-        
-        self.channel_snapshot[guild.id] = channels
-        print(f'Слепок: {guild.name} — {len(channels)} каналов')
-
-    async def on_guild_channel_delete(self, channel):
-        if not channel.guild or self.recovering:
-            return
-
+@bot.event
+async def on_guild_channel_delete(channel):
+    """Отслеживает удаление каналов и банит нарушителей"""
+    try:
+        # Получаем аудит лога
         guild = channel.guild
-        now = asyncio.get_running_loop().time()
-
-        self.deleted_timestamps[guild.id] = [
-            t for t in self.deleted_timestamps[guild.id]
-            if now - t <= self.detection_window
-        ]
-        self.deleted_timestamps[guild.id].append(now)
         
-        print(f'Удалён канал: {channel.name} ({len(self.deleted_timestamps[guild.id])}/{self.threshold})')
+        async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
+            # Проверяем, совпадает ли канал и время
+            if entry.target.id == channel.id:
+                deleter = entry.user
+                
+                # Игнорируем действия самого бота
+                if deleter.id == bot.user.id:
+                    return
+                
+                current_time = time.time()
+                
+                # Добавляем запись об удалении
+                channel_deletions[deleter.id].append(current_time)
+                
+                # Удаляем старые записи (старше временного окна)
+                channel_deletions[deleter.id] = [
+                    t for t in channel_deletions[deleter.id] 
+                    if current_time - t <= TIME_WINDOW
+                ]
+                
+                # Проверяем количество удалений в окне
+                if len(channel_deletions[deleter.id]) >= NUKE_THRESHOLD:
+                    await handle_nuke(guild, deleter)
+                
+                break
+    
+    except discord.Forbidden:
+        print(f"❌ Недостаточно прав в {guild.name}")
+    except Exception as e:
+        print(f"❌ Ошибка: {e}")
 
-        if len(self.deleted_timestamps[guild.id]) >= self.threshold:
-            print('ТРИГГЕР АНТИ-НЮК')
-            self.recovering = True
-            self.deleted_timestamps[guild.id].clear()
-
+async def handle_nuke(guild, user):
+    """Обрабатывает обнаруженный нюк"""
+    try:
+        # Баним нарушителя
+        await guild.ban(
+            user,
+            reason="Анти-нюк: удаление нескольких каналов за 2 секунды",
+            delete_message_days=1
+        )
+        
+        print(f"🚨 Забанен {user} ({user.id}) на сервере {guild.name}")
+        
+        # Отправляем уведомление в первый доступный текстовый канал
+        for channel in guild.text_channels:
             try:
-                # БАН
-                async for entry in guild.audit_logs(action=discord.AuditLogAction.channel_delete, limit=1):
-                    if entry.user and entry.user.id not in self.whitelist:
-                        try:
-                            await guild.ban(entry.user, reason='Анти-нюк: удаление каналов')
-                            print(f'Забанен: {entry.user}')
-                        except Exception as e:
-                            print(f'Ошибка бана: {e}')
-                        break
-
-                # ВОССТАНОВЛЕНИЕ
-                if guild.id not in self.channel_snapshot:
-                    print('НЕТ СЛЕПКА, сохраняю заново')
-                    await self.save_snapshot(guild)
-
-                current_names = {ch.name for ch in guild.channels}
-                snapshot = self.channel_snapshot.get(guild.id, [])
+                embed = discord.Embed(
+                    title="🚨 Обнаружен нюк!",
+                    description=f"Пользователь **{user}** (`{user.id}`) был забанен за попытку нюка.",
+                    color=discord.Color.red()
+                )
+                embed.add_field(name="Причина", value="Удаление каналов с высокой скоростью")
+                embed.add_field(name="Сервер", value=guild.name)
+                embed.set_footer(text="Анти-Нюк система")
                 
-                print(f'Текущих каналов: {len(current_names)}, в слепке: {len(snapshot)}')
-                
-                restored = 0
-                for saved in snapshot:
-                    if saved['name'] not in current_names:
-                        try:
-                            category = None
-                            if saved['category_id']:
-                                category = guild.get_channel(saved['category_id'])
-                            
-                            new_channel = await guild.create_text_channel(
-                                name=saved['name'],
-                                category=category,
-                                position=saved['position']
-                            )
-                            restored += 1
-                            print(f'  Восстановлен: {saved["name"]}')
-                            await asyncio.sleep(0.5)
-                        except Exception as e:
-                            print(f'  Ошибка восстановления {saved["name"]}: {e}')
-
-                print(f'Итого восстановлено: {restored}')
-
-            except Exception as e:
-                print(f'Критическая ошибка: {e}')
-            finally:
-                self.recovering = False
-
-    async def on_guild_join(self, guild):
-        print(f'Добавлен на сервер: {guild.name}')
-        await asyncio.sleep(2)
-        await self.save_snapshot(guild)
-
-    async def on_guild_role_delete(self, role):
-        guild = role.guild
+                await channel.send(embed=embed)
+                break
+            except:
+                continue
+        
+        # Уведомление владельцу в ЛС (опционально)
+        if OWNER_ID != 123456789:  # Если ID изменен
+            try:
+                owner = await bot.fetch_user(OWNER_ID)
+                if owner:
+                    await owner.send(
+                        f"🚨 Нюк на сервере **{guild.name}**!\n"
+                        f"Нарушитель: {user} ({user.id})\n"
+                        f"Действие: Забанен"
+                    )
+            except:
+                pass
+    
+    except discord.Forbidden:
+        print(f"❌ Нет прав на бан в {guild.name}")
+        # Пытаемся кикнуть если нельзя забанить
         try:
-            async for entry in guild.audit_logs(action=discord.AuditLogAction.role_delete, limit=1):
-                if entry.user and entry.user.id not in self.whitelist:
-                    try:
-                        await guild.ban(entry.user, reason='Анти-нюк: удаление ролей')
-                    except Exception:
-                        pass
-        except Exception:
+            await guild.kick(user, reason="Анти-нюк: попытка нюка")
+        except:
             pass
+    except Exception as e:
+        print(f"❌ Ошибка при бане: {e}")
 
-    async def on_member_ban(self, guild, user):
-        try:
-            async for entry in guild.audit_logs(action=discord.AuditLogAction.ban, limit=1):
-                if entry.user and entry.user.id not in self.whitelist:
-                    try:
-                        await guild.ban(entry.user, reason='Анти-нюк: бан участников')
-                        await guild.unban(user)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+# Очистка старых записей каждые 5 минут
+async def cleanup_old_entries():
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        current_time = time.time()
+        for user_id in list(channel_deletions.keys()):
+            channel_deletions[user_id] = [
+                t for t in channel_deletions[user_id] 
+                if current_time - t <= TIME_WINDOW
+            ]
+            if not channel_deletions[user_id]:
+                del channel_deletions[user_id]
+        await asyncio.sleep(300)  # 5 минут
 
-bot = AntiNuke()
-bot.run(os.environ['DISCORD_TOKEN'])
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def status(ctx):
+    """Проверка статуса анти-нюк системы"""
+    embed = discord.Embed(
+        title="🛡️ Анти-Нюк Статус",
+        color=discord.Color.green()
+    )
+    embed.add_field(name="Порог срабатывания", value=f"{NUKE_THRESHOLD} каналов")
+    embed.add_field(name="Временное окно", value=f"{TIME_WINDOW} сек")
+    embed.add_field(name="Отслеживаемых пользователей", value=len(channel_deletions))
+    await ctx.send(embed=embed)
+
+# Запуск бота
+if __name__ == "__main__":
+    # Запускаем очистку в фоне
+    bot.loop.create_task(cleanup_old_entries())
+    
+    # Получаем токен из переменных окружения Render
+    TOKEN = os.getenv('DISCORD_TOKEN')
+    
+    if not TOKEN:
+        print("❌ Токен не найден! Установи переменную DISCORD_TOKEN в Render")
+    else:
+        bot.run(TOKEN)
