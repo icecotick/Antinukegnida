@@ -190,6 +190,7 @@ async def punish(
     host="Host of the deployment",
     co_host="Co-host of the deployment (optional)",
     time="Duration of the deployment (example: around 40 mins)",
+    points="Points earned (example: 2)",
     proof="Screenshot of the deployment",
     attendees="Attendees (mentions separated by space, example: @user1 @user2 @user3)"
 )
@@ -198,6 +199,7 @@ async def deploy_log(
     deployment_number: int,
     host: discord.Member,
     time: str,
+    points: str,
     proof: discord.Attachment,
     attendees: str,
     co_host: discord.Member = None
@@ -221,6 +223,7 @@ async def deploy_log(
         deploy_message += "Co-Host: <@>\n"
     
     deploy_message += f"Time: {time}\n"
+    deploy_message += f"Points: {points}\n"
     deploy_message += f"Attendees: {attendees}"
     
     proof_file = await proof.to_file()
