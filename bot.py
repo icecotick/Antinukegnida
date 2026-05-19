@@ -14,6 +14,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 ALLOWED_ROLES = [1499016923868823594, 1496544521217904671, 1496554366709137508]
 OWNER_IDS = [1079985192556580934, 978148077590446090]
+PUNISHMENT_COUNT = 0
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -108,6 +109,77 @@ async def banish_to_janitor(interaction: discord.Interaction, user: discord.Memb
         return
     
     if role in user.roles:
+        await interaction.followup.send(f"{user.mention} already has the janitor role.", ephemeral=True)
+        return
+    
+    try:
+        await user.add_roles(role)
+        await interaction.followup.send(f"{user.mention} has been banished to janitor.", ephemeral=True)
+    except discord.Forbidden:
+        await interaction.followup.send("I do not have permission to assign this role.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"An error occurred: {e}", ephemeral=True)
+
+@bot.tree.command(name="troll_luke", description="Send a message to troll Luke")
+async def troll_luke(interaction: discord.Interaction):
+    if not has_permission(interaction):
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    message = "<@978148077590446090> LUKE THE CLASS D APPS ARE READ"
+    image_url = "https://cdn.discordapp.com/attachments/1496718942335533136/1502958361136730192/image.png?ex=6a02ec0c&is=6a019a8c&hm=c0c2b36ed47b09d07c143b01e016a93d18d54315662155cf1399d1f21b0ca43f"
+    
+    await interaction.channel.send(content=message)
+    await interaction.channel.send(content=image_url)
+    
+    await interaction.followup.send("Luke has been trolled.", ephemeral=True)
+
+@bot.tree.command(name="punish", description="Issue a punishment to a user")
+@app_commands.describe(
+    user="The user receiving the punishment",
+    reason="Reason for the punishment",
+    punishment="Type of punishment",
+    proof="Screenshot or proof URL",
+    approved_by="Who approved this punishment (mention)"
+)
+async def punish(
+    interaction: discord.Interaction, 
+    user: discord.Member, 
+    reason: str, 
+    punishment: str, 
+    proof: str, 
+    approved_by: str
+):
+    if not has_permission(interaction):
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+    
+    global PUNISHMENT_COUNT
+    PUNISHMENT_COUNT += 1
+    
+    issuer_roles = ""
+    if interaction.user.id in OWNER_IDS:
+        issuer_roles = "High Council"
+    else:
+        user_roles = [role.name for role in interaction.user.roles if role.id in ALLOWED_ROLES]
+        if user_roles:
+            issuer_roles = user_roles[0]
+    
+    punishment_message = f"**Punishment #{PUNISHMENT_COUNT}**\n\n"
+    punishment_message += f"`User of punishment:` {user.mention}\n\n"
+    punishment_message += f"`Reason of punishment:` {reason}\n\n"
+    punishment_message += f"`Punishment:` {punishment}\n\n"
+    punishment_message += f"`Issuer of punishment:` {interaction.user.mention} {issuer_roles}\n\n"
+    punishment_message += f"`Proof of punishment:` {proof}\n\n"
+    punishment_message += f"`Approved by:` {approved_by}\n\n"
+    punishment_message += f"-# Filed by: {interaction.user.mention}"
+    
+    await interaction.response.send_message(punishment_message)
+
+threading.Thread(target=run_http_server, daemon=True).start()
+bot.run(os.getenv("DISCORD_TOKEN"))    if role in user.roles:
         await interaction.followup.send(f"{user.mention} already has the janitor role.", ephemeral=True)
         return
     
