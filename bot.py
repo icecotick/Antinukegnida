@@ -13,7 +13,7 @@ intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 ALLOWED_ROLES = [1499016923868823594, 1496544521217904671, 1496554366709137508]
-OWNER_ID = 1079985192556580934
+OWNER_IDS = [1079985192556580934, 978148077590446090]
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -27,7 +27,7 @@ def run_http_server():
     server.serve_forever()
 
 def has_permission(interaction: discord.Interaction) -> bool:
-    if interaction.user.id == OWNER_ID:
+    if interaction.user.id in OWNER_IDS:
         return True
     user_role_ids = [role.id for role in interaction.user.roles]
     return any(role_id in user_role_ids for role_id in ALLOWED_ROLES)
