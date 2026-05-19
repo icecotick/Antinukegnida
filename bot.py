@@ -179,33 +179,4 @@ async def punish(
     await interaction.response.send_message(punishment_message)
 
 threading.Thread(target=run_http_server, daemon=True).start()
-bot.run(os.getenv("DISCORD_TOKEN"))    if role in user.roles:
-        await interaction.followup.send(f"{user.mention} already has the janitor role.", ephemeral=True)
-        return
-    
-    try:
-        await user.add_roles(role)
-        await interaction.followup.send(f"{user.mention} has been banished to janitor.", ephemeral=True)
-    except discord.Forbidden:
-        await interaction.followup.send("I do not have permission to assign this role.", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"An error occurred: {e}", ephemeral=True)
-
-@bot.tree.command(name="troll_luke", description="Send a message to troll Luke")
-async def troll_luke(interaction: discord.Interaction):
-    if not has_permission(interaction):
-        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
-        return
-    
-    await interaction.response.defer(ephemeral=True)
-    
-    message = "<@978148077590446090> LUKE THE CLASS D APPS ARE READ"
-    image_url = "https://cdn.discordapp.com/attachments/1496718942335533136/1502958361136730192/image.png?ex=6a02ec0c&is=6a019a8c&hm=c0c2b36ed47b09d07c143b01e016a93d18d54315662155cf1399d1f21b0ca43f"
-    
-    await interaction.channel.send(content=message)
-    await interaction.channel.send(content=image_url)
-    
-    await interaction.followup.send("Luke has been trolled.", ephemeral=True)
-
-threading.Thread(target=run_http_server, daemon=True).start()
 bot.run(os.getenv("DISCORD_TOKEN"))
