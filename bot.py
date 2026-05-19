@@ -1,152 +1,139 @@
 import discord
+from discord import app_commands
 from discord.ext import commands
-import os
-from collections import defaultdict
-import time
 import asyncio
+import os
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import threading
 
-# Настройка интентов
 intents = discord.Intents.default()
 intents.message_content = True
-intents.guilds = True
 intents.members = True
-intents.moderation = True
 
-# Константы
-NUKE_THRESHOLD = 2  # Количество каналов
-TIME_WINDOW = 2  # В секундах
-OWNER_ID = 123456789  # Замени на свой Discord ID
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-class AntiNukeBot(commands.Bot):
-    def __init__(self):
-        super().__init__(command_prefix='!', intents=intents)
-        self.channel_deletions = defaultdict(list)
-        
-    async def setup_hook(self):
-        """Запускается перед подключением к Discord"""
-        self.loop.create_task(self.cleanup_old_entries())
-        print("🔄 Фоновые задачи запущены")
-    
-    async def cleanup_old_entries(self):
-        """Очистка старых записей"""
-        await self.wait_until_ready()
-        while not self.is_closed():
-            current_time = time.time()
-            for user_id in list(self.channel_deletions.keys()):
-                self.channel_deletions[user_id] = [
-                    t for t in self.channel_deletions[user_id] 
-                    if current_time - t <= TIME_WINDOW
-                ]
-                if not self.channel_deletions[user_id]:
-                    del self.channel_deletions[user_id]
-            await asyncio.sleep(300)
+ALLOWED_ROLES = [1499016923868823594, 1496544521217904671, 1496554366709137508]
+OWNER_ID = 1079985192556580934
 
-bot = AntiNukeBot()
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is running")
+
+def run_http_server():
+    port = int(os.getenv("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), Handler)
+    server.serve_forever()
+
+def has_permission(interaction: discord.Interaction) -> bool:
+    if interaction.user.id == OWNER_ID:
+        return True
+    user_role_ids = [role.id for role in interaction.user.roles]
+    return any(role_id in user_role_ids for role_id in ALLOWED_ROLES)
 
 @bot.event
 async def on_ready():
-    print(f'✅ {bot.user} запущен на Render!')
-    await bot.change_presence(activity=discord.Activity(
-        type=discord.ActivityType.watching, 
-        name="за нюкерами 👀"
-    ))
-
-@bot.event
-async def on_guild_channel_delete(channel):
-    """Отслеживает удаление каналов и банит нарушителей"""
+    print(f"Logged in as {bot.user}")
     try:
-        guild = channel.guild
-        
-        async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
-            if entry.target.id == channel.id:
-                deleter = entry.user
-                
-                if deleter.id == bot.user.id:
-                    return
-                
-                current_time = time.time()
-                bot.channel_deletions[deleter.id].append(current_time)
-                
-                bot.channel_deletions[deleter.id] = [
-                    t for t in bot.channel_deletions[deleter.id] 
-                    if current_time - t <= TIME_WINDOW
-                ]
-                
-                if len(bot.channel_deletions[deleter.id]) >= NUKE_THRESHOLD:
-                    await handle_nuke(guild, deleter)
-                
-                break
-    
-    except discord.Forbidden:
-        print(f"❌ Недостаточно прав в {guild.name}")
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} commands")
     except Exception as e:
-        print(f"❌ Ошибка: {e}")
+        print(f"Failed to sync commands: {e}")
 
-async def handle_nuke(guild, user):
-    """Обрабатывает обнаруженный нюк"""
-    try:
-        await guild.ban(
-            user,
-            reason="Анти-нюк: удаление нескольких каналов за 2 секунды",
-            delete_message_days=1
-        )
-        
-        print(f"🚨 Забанен {user} ({user.id}) на сервере {guild.name}")
-        
-        for channel in guild.text_channels:
-            try:
-                embed = discord.Embed(
-                    title="🚨 Обнаружен нюк!",
-                    description=f"Пользователь **{user}** (`{user.id}`) был забанен за попытку нюка.",
-                    color=discord.Color.red()
-                )
-                embed.add_field(name="Причина", value="Удаление каналов с высокой скоростью")
-                embed.add_field(name="Сервер", value=guild.name)
-                embed.set_footer(text="Анти-Нюк система")
-                
-                await channel.send(embed=embed)
-                break
-            except:
-                continue
-        
-        if OWNER_ID != 123456789:
-            try:
-                owner = await bot.fetch_user(OWNER_ID)
-                if owner:
-                    await owner.send(
-                        f"🚨 Нюк на сервере **{guild.name}**!\n"
-                        f"Нарушитель: {user} ({user.id})\n"
-                        f"Действие: Забанен"
-                    )
-            except:
-                pass
+@bot.tree.command(name="say", description="Make the bot say something with an optional image")
+@app_commands.describe(
+    message="The message you want the bot to say",
+    image="Optional image to attach"
+)
+async def say(interaction: discord.Interaction, message: str, image: discord.Attachment = None):
+    if not has_permission(interaction):
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
     
-    except discord.Forbidden:
-        print(f"❌ Нет прав на бан в {guild.name}")
-        try:
-            await guild.kick(user, reason="Анти-нюк: попытка нюка")
-        except:
-            pass
-    except Exception as e:
-        print(f"❌ Ошибка при бане: {e}")
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def status(ctx):
-    """Проверка статуса анти-нюк системы"""
-    embed = discord.Embed(
-        title="🛡️ Анти-Нюк Статус",
-        color=discord.Color.green()
-    )
-    embed.add_field(name="Порог срабатывания", value=f"{NUKE_THRESHOLD} каналов")
-    embed.add_field(name="Временное окно", value=f"{TIME_WINDOW} сек")
-    embed.add_field(name="Отслеживаемых пользователей", value=len(bot.channel_deletions))
-    await ctx.send(embed=embed)
-
-if __name__ == "__main__":
-    TOKEN = os.getenv('DISCORD_TOKEN')
+    await interaction.response.defer(ephemeral=True)
     
-    if not TOKEN:
-        print("❌ Токен не найден! Установи переменную DISCORD_TOKEN в Render")
+    if image:
+        if not image.content_type or not image.content_type.startswith("image/"):
+            await interaction.followup.send("The attached file must be an image.", ephemeral=True)
+            return
+        await interaction.channel.send(content=message, file=await image.to_file())
     else:
-        bot.run(TOKEN)
+        await interaction.channel.send(content=message)
+    
+    await interaction.followup.send("Message sent.", ephemeral=True)
+
+@bot.tree.command(name="deployment_poll", description="Send a deployment poll with role ping")
+async def deployment_poll(interaction: discord.Interaction):
+    if not has_permission(interaction):
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    role_id = 1496542870117810298
+    poll_message = f"<@&{role_id}>\n# Deployment Poll\n- React if you can attend.\n- Ends in 30 minutes."
+    
+    poll_msg = await interaction.channel.send(poll_message)
+    await poll_msg.add_reaction("\u2705")
+    
+    await interaction.followup.send("Deployment poll sent.", ephemeral=True)
+    
+    await asyncio.sleep(1800)
+    
+    try:
+        poll_msg = await interaction.channel.fetch_message(poll_msg.id)
+        reaction = discord.utils.get(poll_msg.reactions, emoji="\u2705")
+        if reaction:
+            users = [user async for user in reaction.users() if not user.bot]
+            result = f"**Poll Results:** {len(users)} people reacted."
+            await interaction.channel.send(result)
+    except:
+        pass
+
+@bot.tree.command(name="banish_to_janitor", description="Give a user the janitor role")
+@app_commands.describe(user="The user to banish to janitor")
+async def banish_to_janitor(interaction: discord.Interaction, user: discord.Member):
+    if not has_permission(interaction):
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    role_id = 1503036586349301770
+    role = interaction.guild.get_role(role_id)
+    
+    if not role:
+        await interaction.followup.send("The janitor role was not found. Please check the role ID.", ephemeral=True)
+        return
+    
+    if role in user.roles:
+        await interaction.followup.send(f"{user.mention} already has the janitor role.", ephemeral=True)
+        return
+    
+    try:
+        await user.add_roles(role)
+        await interaction.followup.send(f"{user.mention} has been banished to janitor.", ephemeral=True)
+    except discord.Forbidden:
+        await interaction.followup.send("I do not have permission to assign this role.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"An error occurred: {e}", ephemeral=True)
+
+@bot.tree.command(name="troll_luke", description="Send a message to troll Luke")
+async def troll_luke(interaction: discord.Interaction):
+    if not has_permission(interaction):
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    message = "<@978148077590446090> LUKE THE CLASS D APPS ARE READ"
+    image_url = "https://cdn.discordapp.com/attachments/1496718942335533136/1502958361136730192/image.png?ex=6a02ec0c&is=6a019a8c&hm=c0c2b36ed47b09d07c143b01e016a93d18d54315662155cf1399d1f21b0ca43f"
+    
+    await interaction.channel.send(content=message)
+    await interaction.channel.send(content=image_url)
+    
+    await interaction.followup.send("Luke has been trolled.", ephemeral=True)
+
+threading.Thread(target=run_http_server, daemon=True).start()
+bot.run(os.getenv("DISCORD_TOKEN"))
