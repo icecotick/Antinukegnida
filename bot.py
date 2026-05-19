@@ -171,7 +171,7 @@ async def punish(
     punishment_message += f"`User of punishment:` {user.mention}\n\n"
     punishment_message += f"`Reason of punishment:` {reason}\n\n"
     punishment_message += f"`Punishment:` {punishment}\n\n"
-    punishment_message += f"`Issuer of punishment:` {interaction.user.mention} {issuer_roles}\n\n"
+    punishment_message += f"`Issuer of punishment:` {interaction.user.mention}\n\n"
     punishment_message += f"`Proof of punishment:` {proof}\n\n"
     punishment_message += f"`Approved by:` {approved_by}\n\n"
     punishment_message += f"-# Filed by: {interaction.user.mention}"
