@@ -14,7 +14,6 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 ALLOWED_ROLES = [1499016923868823594, 1496544521217904671, 1496554366709137508]
 OWNER_IDS = [1079985192556580934, 978148077590446090]
-PUNISHMENT_COUNT = 0
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -138,26 +137,31 @@ async def troll_luke(interaction: discord.Interaction):
 
 @bot.tree.command(name="punish", description="Issue a punishment to a user")
 @app_commands.describe(
+    punishment_number="Punishment number (example: 4)",
     user="The user receiving the punishment",
     reason="Reason for the punishment",
-    punishment="Type of punishment",
-    proof="Screenshot or proof URL",
+    punishment="Type of punishment (example: Verbal Warning)",
+    proof="Screenshot of the proof",
     approved_by="Who approved this punishment (mention)"
 )
 async def punish(
     interaction: discord.Interaction, 
+    punishment_number: int,
     user: discord.Member, 
     reason: str, 
     punishment: str, 
-    proof: str, 
+    proof: discord.Attachment, 
     approved_by: str
 ):
     if not has_permission(interaction):
         await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
     
-    global PUNISHMENT_COUNT
-    PUNISHMENT_COUNT += 1
+    if not proof.content_type or not proof.content_type.startswith("image/"):
+        await interaction.response.send_message("The proof must be an image file.", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=True)
     
     issuer_roles = ""
     if interaction.user.id in OWNER_IDS:
@@ -167,16 +171,62 @@ async def punish(
         if user_roles:
             issuer_roles = user_roles[0]
     
-    punishment_message = f"**Punishment #{PUNISHMENT_COUNT}**\n\n"
+    punishment_message = f"**Punishment #{punishment_number}**\n\n"
     punishment_message += f"`User of punishment:` {user.mention}\n\n"
     punishment_message += f"`Reason of punishment:` {reason}\n\n"
     punishment_message += f"`Punishment:` {punishment}\n\n"
-    punishment_message += f"`Issuer of punishment:` {interaction.user.mention}\n\n"
-    punishment_message += f"`Proof of punishment:` {proof}\n\n"
+    punishment_message += f"`Issuer of punishment:` {interaction.user.mention} {issuer_roles}\n\n"
+    
+    proof_file = await proof.to_file()
     punishment_message += f"`Approved by:` {approved_by}\n\n"
     punishment_message += f"-# Filed by: {interaction.user.mention}"
     
-    await interaction.response.send_message(punishment_message)
+    await interaction.channel.send(content=punishment_message, file=proof_file)
+    await interaction.followup.send("Punishment issued.", ephemeral=True)
+
+@bot.tree.command(name="deploy_log", description="Log a deployment")
+@app_commands.describe(
+    deployment_number="Deployment number (example: 8)",
+    host="Host of the deployment",
+    co_host="Co-host of the deployment (optional)",
+    time="Duration of the deployment (example: around 40 mins)",
+    proof="Screenshot of the deployment",
+    attendees="Attendees (mentions separated by space, example: @user1 @user2 @user3)"
+)
+async def deploy_log(
+    interaction: discord.Interaction,
+    deployment_number: int,
+    host: discord.Member,
+    time: str,
+    proof: discord.Attachment,
+    attendees: str,
+    co_host: discord.Member = None
+):
+    if not has_permission(interaction):
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+    
+    if not proof.content_type or not proof.content_type.startswith("image/"):
+        await interaction.response.send_message("The proof must be an image file.", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    deploy_message = f"# Deployment {deployment_number}\n\n"
+    deploy_message += f"Host: {host.mention}\n"
+    
+    if co_host:
+        deploy_message += f"Co-Host: {co_host.mention}\n"
+    else:
+        deploy_message += "Co-Host: <@>\n"
+    
+    deploy_message += f"Time: {time}\n"
+    deploy_message += f"Attendees: {attendees}"
+    
+    proof_file = await proof.to_file()
+    
+    await interaction.channel.send(content=deploy_message, file=proof_file)
+    await interaction.followup.send("Deployment logged.", ephemeral=True)
 
 threading.Thread(target=run_http_server, daemon=True).start()
 bot.run(os.getenv("DISCORD_TOKEN"))
