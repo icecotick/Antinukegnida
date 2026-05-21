@@ -14,6 +14,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 ALLOWED_ROLES = [1499016923868823594, 1496544521217904671, 1496554366709137508]
 OWNER_IDS = [1079985192556580934, 978148077590446090]
+MOD_ROLE_ID = 1496544521217904671  # Role that can only use deployment_poll and deploy_log
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -31,6 +32,12 @@ def has_permission(interaction: discord.Interaction) -> bool:
         return True
     user_role_ids = [role.id for role in interaction.user.roles]
     return any(role_id in user_role_ids for role_id in ALLOWED_ROLES)
+
+def has_mod_permission(interaction: discord.Interaction) -> bool:
+    if interaction.user.id in OWNER_IDS:
+        return True
+    user_role_ids = [role.id for role in interaction.user.roles]
+    return MOD_ROLE_ID in user_role_ids or any(role_id in user_role_ids for role_id in ALLOWED_ROLES)
 
 @bot.event
 async def on_ready():
@@ -65,7 +72,7 @@ async def say(interaction: discord.Interaction, message: str, image: discord.Att
 
 @bot.tree.command(name="deployment_poll", description="Send a deployment poll with role ping")
 async def deployment_poll(interaction: discord.Interaction):
-    if not has_permission(interaction):
+    if not has_mod_permission(interaction):
         await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
     
@@ -175,7 +182,7 @@ async def punish(
     punishment_message += f"`User of punishment:` {user.mention}\n\n"
     punishment_message += f"`Reason of punishment:` {reason}\n\n"
     punishment_message += f"`Punishment:` {punishment}\n\n"
-    punishment_message += f"`Issuer of punishment:` {interaction.user.mention} {issuer_roles}\n\n"
+    punishment_message += f"`Issuer of punishment:` {interaction.user.mention}\n\n"
     
     proof_file = await proof.to_file()
     punishment_message += f"`Approved by:` {approved_by}\n\n"
@@ -204,7 +211,7 @@ async def deploy_log(
     attendees: str,
     co_host: discord.Member = None
 ):
-    if not has_permission(interaction):
+    if not has_mod_permission(interaction):
         await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
     
