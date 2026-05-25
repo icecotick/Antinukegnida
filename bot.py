@@ -387,7 +387,7 @@ processed_messages = set()
 
 @bot.event
 async def on_message(message):
-    # Ignore own messages
+    # Ignore own messages completely
     if message.author == bot.user:
         return
     
@@ -400,17 +400,17 @@ async def on_message(message):
         return
     processed_messages.add(message.id)
     
-    # Clean old message IDs from set (keep last 1000)
+    # Clean old message IDs periodically
     if len(processed_messages) > 1000:
         processed_messages.clear()
     
     should_respond = False
     
-    # Check if bot was mentioned/pinged
-    if bot.user.mentioned_in(message):
+    # Check if bot was mentioned/pinged directly
+    if bot.user in message.mentions:
         should_respond = True
     
-    # Check if replying to bot's message
+    # Check if replying to bot's message (only if not already mentioned)
     if not should_respond and message.reference and message.reference.message_id:
         try:
             replied_msg = await message.channel.fetch_message(message.reference.message_id)
@@ -420,12 +420,18 @@ async def on_message(message):
             pass
     
     if should_respond:
+        # Add small delay to prevent rate limiting
+        await asyncio.sleep(0.5)
         async with message.channel.typing():
             await asyncio.sleep(1)
             response = get_ai_response(message.content)
-            await message.reply(response, mention_author=True)
+            try:
+                await message.reply(response, mention_author=True)
+            except discord.HTTPException:
+                pass
+        return  # Important: return here to prevent further processing
     
-    # Process commands
+    # Process commands for non-response messages
     await bot.process_commands(message)
 
 # ==================== HTTP SERVER ====================
