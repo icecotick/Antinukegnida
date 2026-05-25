@@ -382,8 +382,10 @@ def get_ai_response(message_content):
 
 # ==================== BOT EVENTS ====================
 
-# Track processed messages to avoid duplicates
+# Track processed messages and cooldowns
 processed_messages = set()
+last_response_time = {}
+RESPONSE_COOLDOWN = 3  # seconds between responses per channel
 
 @bot.event
 async def on_message(message):
@@ -394,6 +396,13 @@ async def on_message(message):
     # Ignore other bots
     if message.author.bot:
         return
+    
+    # Check cooldown per channel
+    channel_id = message.channel.id
+    current_time = asyncio.get_event_loop().time()
+    if channel_id in last_response_time:
+        if current_time - last_response_time[channel_id] < RESPONSE_COOLDOWN:
+            return
     
     # Prevent duplicate processing
     if message.id in processed_messages:
@@ -410,7 +419,7 @@ async def on_message(message):
     if bot.user in message.mentions:
         should_respond = True
     
-    # Check if replying to bot's message (only if not already mentioned)
+    # Check if replying to bot's message
     if not should_respond and message.reference and message.reference.message_id:
         try:
             replied_msg = await message.channel.fetch_message(message.reference.message_id)
@@ -420,18 +429,14 @@ async def on_message(message):
             pass
     
     if should_respond:
-        # Add small delay to prevent rate limiting
-        await asyncio.sleep(0.5)
+        last_response_time[channel_id] = current_time
         async with message.channel.typing():
             await asyncio.sleep(1)
             response = get_ai_response(message.content)
-            try:
-                await message.reply(response, mention_author=True)
-            except discord.HTTPException:
-                pass
-        return  # Important: return here to prevent further processing
+            await message.reply(response, mention_author=True)
+        return
     
-    # Process commands for non-response messages
+    # Process commands
     await bot.process_commands(message)
 
 # ==================== HTTP SERVER ====================
