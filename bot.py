@@ -153,7 +153,7 @@ QUESTIONS_ABOUT_BOT_RESPONSES = [
     "I'm a Discord bot created to help manage this server! I can log deployments, issue punishments, and chat with users.",
     "Just your friendly neighborhood Discord bot! I help with server management and can chat with anyone who pings me.",
     "I'm a custom bot built for this server. I handle commands like /deploy_log, /punish, and more. Plus I love chatting!",
-    "TBK assistant bot. Just bot. I help the server admins keep things organized and I'm always up for a conversation!",
+    "TBK's bot. Just bot. I help the server admins keep things organized and I'm always up for a conversation!",
     "I'm the server management bot! I can post deployment polls, log deployments, handle punishments, and chat with members."
 ]
 
@@ -380,65 +380,6 @@ def get_ai_response(message_content):
     # Unknown message
     return random.choice(UNKNOWN_RESPONSES)
 
-# ==================== BOT EVENTS ====================
-
-# Track processed messages and cooldowns
-processed_messages = set()
-last_response_time = {}
-RESPONSE_COOLDOWN = 3  # seconds between responses per channel
-
-@bot.event
-async def on_message(message):
-    # Ignore own messages completely
-    if message.author == bot.user:
-        return
-    
-    # Ignore other bots
-    if message.author.bot:
-        return
-    
-    # Check cooldown per channel
-    channel_id = message.channel.id
-    current_time = asyncio.get_event_loop().time()
-    if channel_id in last_response_time:
-        if current_time - last_response_time[channel_id] < RESPONSE_COOLDOWN:
-            return
-    
-    # Prevent duplicate processing
-    if message.id in processed_messages:
-        return
-    processed_messages.add(message.id)
-    
-    # Clean old message IDs periodically
-    if len(processed_messages) > 1000:
-        processed_messages.clear()
-    
-    should_respond = False
-    
-    # Check if bot was mentioned/pinged directly
-    if bot.user in message.mentions:
-        should_respond = True
-    
-    # Check if replying to bot's message
-    if not should_respond and message.reference and message.reference.message_id:
-        try:
-            replied_msg = await message.channel.fetch_message(message.reference.message_id)
-            if replied_msg.author == bot.user:
-                should_respond = True
-        except:
-            pass
-    
-    if should_respond:
-        last_response_time[channel_id] = current_time
-        async with message.channel.typing():
-            await asyncio.sleep(1)
-            response = get_ai_response(message.content)
-            await message.reply(response, mention_author=True)
-        return
-    
-    # Process commands
-    await bot.process_commands(message)
-
 # ==================== HTTP SERVER ====================
 
 class Handler(BaseHTTPRequestHandler):
@@ -495,29 +436,38 @@ async def on_ready():
         self_ping.start()
         print("Self-pinger started")
 
-@bot.event
-async def on_message(message):
+# Use a listener instead of on_message override to avoid conflicts
+@bot.listen('on_message')
+async def on_message_listener(message):
+    # Ignore own messages
+    if message.author == bot.user:
+        return
+    
+    # Ignore other bots
     if message.author.bot:
         return
     
-    # Check if bot was pinged
+    should_respond = False
+    
+    # Check if bot was mentioned/pinged directly
     if bot.user in message.mentions:
+        should_respond = True
+    
+    # Check if replying to bot's message
+    if not should_respond and message.reference and message.reference.message_id:
+        try:
+            replied_msg = await message.channel.fetch_message(message.reference.message_id)
+            if replied_msg.author == bot.user:
+                should_respond = True
+        except:
+            pass
+    
+    if should_respond:
+        await asyncio.sleep(0.5)
         async with message.channel.typing():
             await asyncio.sleep(1)
             response = get_ai_response(message.content)
             await message.reply(response, mention_author=True)
-    
-    # Check if replying to bot's message
-    if message.reference and message.reference.message_id:
-        try:
-            replied_msg = await message.channel.fetch_message(message.reference.message_id)
-            if replied_msg.author == bot.user:
-                async with message.channel.typing():
-                    await asyncio.sleep(1)
-                    response = get_ai_response(message.content)
-                    await message.reply(response, mention_author=True)
-        except:
-            pass
 
 # ==================== SLASH COMMANDS ====================
 
@@ -655,7 +605,7 @@ async def punish(
     punishment_message += f"`User of punishment:` {user.mention}\n\n"
     punishment_message += f"`Reason of punishment:` {reason}\n\n"
     punishment_message += f"`Punishment:` {punishment}\n\n"
-    punishment_message += f"`Issuer of punishment:` {interaction.user.mention}\n\n"
+    punishment_message += f"`Issuer of punishment:` {interaction.user.mention} {issuer_roles}\n\n"
     
     proof_file = await proof.to_file()
     punishment_message += f"`Approved by:` {approved_by}\n\n"
