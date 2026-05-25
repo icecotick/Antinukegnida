@@ -387,6 +387,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"Bot is running")
+    
+    def log_message(self, format, *args):
+        pass
 
 def run_http_server():
     port = int(os.getenv("PORT", 10000))
@@ -409,15 +412,14 @@ def has_mod_permission(interaction: discord.Interaction) -> bool:
 
 # ==================== SELF PING ====================
 
-@tasks.loop(seconds=30)
+@tasks.loop(minutes=5)
 async def self_ping():
     render_url = os.getenv("RENDER_URL")
     if render_url:
         try:
-            response = requests.get(render_url)
-            print(f"Self-ping: {response.status_code}")
-        except Exception as e:
-            print(f"Self-ping failed: {e}")
+            requests.get(render_url, timeout=10)
+        except:
+            pass
 
 # ==================== BOT EVENTS ====================
 
@@ -439,12 +441,14 @@ async def on_message(message):
     if message.author.bot:
         return
     
+    # Check if bot was pinged
     if bot.user in message.mentions:
         async with message.channel.typing():
             await asyncio.sleep(1)
             response = get_ai_response(message.content)
             await message.reply(response, mention_author=True)
     
+    # Check if replying to bot's message
     if message.reference and message.reference.message_id:
         try:
             replied_msg = await message.channel.fetch_message(message.reference.message_id)
@@ -592,7 +596,7 @@ async def punish(
     punishment_message += f"`User of punishment:` {user.mention}\n\n"
     punishment_message += f"`Reason of punishment:` {reason}\n\n"
     punishment_message += f"`Punishment:` {punishment}\n\n"
-    punishment_message += f"`Issuer of punishment:` {interaction.user.mention} {issuer_roles}\n\n"
+    punishment_message += f"`Issuer of punishment:` {interaction.user.mention}\n\n"
     
     proof_file = await proof.to_file()
     punishment_message += f"`Approved by:` {approved_by}\n\n"
@@ -650,5 +654,6 @@ async def deploy_log(
 
 # ==================== START BOT ====================
 
-threading.Thread(target=run_http_server, daemon=True).start()
-bot.run(os.getenv("DISCORD_TOKEN"))
+if __name__ == "__main__":
+    threading.Thread(target=run_http_server, daemon=True).start()
+    bot.run(os.getenv("DISCORD_TOKEN"))
