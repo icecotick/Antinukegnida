@@ -153,7 +153,7 @@ QUESTIONS_ABOUT_BOT_RESPONSES = [
     "I'm a Discord bot created to help manage this server! I can log deployments, issue punishments, and chat with users.",
     "Just your friendly neighborhood Discord bot! I help with server management and can chat with anyone who pings me.",
     "I'm a custom bot built for this server. I handle commands like /deploy_log, /punish, and more. Plus I love chatting!",
-    "Name's bot. Just bot. I help the server admins keep things organized and I'm always up for a conversation!",
+    "TBK assistant bot. Just bot. I help the server admins keep things organized and I'm always up for a conversation!",
     "I'm the server management bot! I can post deployment polls, log deployments, handle punishments, and chat with members."
 ]
 
