@@ -380,6 +380,54 @@ def get_ai_response(message_content):
     # Unknown message
     return random.choice(UNKNOWN_RESPONSES)
 
+# ==================== BOT EVENTS ====================
+
+# Track processed messages to avoid duplicates
+processed_messages = set()
+
+@bot.event
+async def on_message(message):
+    # Ignore own messages
+    if message.author == bot.user:
+        return
+    
+    # Ignore other bots
+    if message.author.bot:
+        return
+    
+    # Prevent duplicate processing
+    if message.id in processed_messages:
+        return
+    processed_messages.add(message.id)
+    
+    # Clean old message IDs from set (keep last 1000)
+    if len(processed_messages) > 1000:
+        processed_messages.clear()
+    
+    should_respond = False
+    
+    # Check if bot was mentioned/pinged
+    if bot.user.mentioned_in(message):
+        should_respond = True
+    
+    # Check if replying to bot's message
+    if not should_respond and message.reference and message.reference.message_id:
+        try:
+            replied_msg = await message.channel.fetch_message(message.reference.message_id)
+            if replied_msg.author == bot.user:
+                should_respond = True
+        except:
+            pass
+    
+    if should_respond:
+        async with message.channel.typing():
+            await asyncio.sleep(1)
+            response = get_ai_response(message.content)
+            await message.reply(response, mention_author=True)
+    
+    # Process commands
+    await bot.process_commands(message)
+
 # ==================== HTTP SERVER ====================
 
 class Handler(BaseHTTPRequestHandler):
